@@ -57,17 +57,38 @@ object VoiceNotes {
     }
 
     @Synchronized
-    fun transcript(c: Context, path: String): String? = load(c).optString(path, "").ifEmpty { null }
+    fun transcript(c: Context, path: String): String? {
+        val v = load(c).opt(path) ?: return null
+        return (if (v is JSONObject) v.optString("t") else v.toString()).ifEmpty { null }
+    }
+
+    /** how long the transcription took, in seconds (0 if unknown) */
+    @Synchronized
+    fun took(c: Context, path: String): Int = ((load(c).opt(path) as? JSONObject)?.optLong("ms") ?: 0L).div(1000).toInt()
 
     @Synchronized
-    fun save(c: Context, path: String, text: String) {
+    fun save(c: Context, path: String, text: String, ms: Long = 0) {
         val j = load(c)
-        j.put(path, text)
+        j.put(path, JSONObject().put("t", text).put("ms", ms))
         // keep cache small
         if (j.length() > 500) {
             val keys = j.keys().asSequence().toList()
             keys.take(j.length() - 400).forEach { j.remove(it) }
         }
         cacheFile(c).writeText(j.toString())
+    }
+
+    private val durations = HashMap<String, Int>()
+
+    /** voice note length in seconds */
+    @Synchronized
+    fun durationSec(path: String): Int = durations.getOrPut(path) {
+        try {
+            val r = android.media.MediaMetadataRetriever()
+            r.setDataSource(path)
+            val ms = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            r.release()
+            (ms / 1000).toInt()
+        } catch (e: Exception) { 0 }
     }
 }

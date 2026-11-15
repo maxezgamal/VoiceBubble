@@ -17,6 +17,21 @@ jobs:
       - name: Get whisper.cpp
         run: git clone --depth 1 --branch v1.9.5 https://github.com/ggml-org/whisper.cpp third_party/whisper.cpp
 
+      - name: Cache Whisper model
+        id: model
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/ggml-small-q5_1.bin
+          key: whisper-ggml-small-q5_1
+
+      - name: Download Whisper Small model (bundled in the APK)
+        if: steps.model.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p app/src/main/assets
+          curl -fL --retry 5 -o app/src/main/assets/ggml-small-q5_1.bin \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin
+          ls -la app/src/main/assets
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

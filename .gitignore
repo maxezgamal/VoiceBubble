@@ -6,3 +6,4 @@ local.properties
 third_party/
 *.iml
 .idea/
+app/src/main/assets/*.bin

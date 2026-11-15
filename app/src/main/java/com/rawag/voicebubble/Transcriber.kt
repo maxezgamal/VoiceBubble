@@ -3,44 +3,44 @@ package com.rawag.voicebubble
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.Executors
 
-/** One background thread, one loaded Whisper model, a queue of files. */
-class Transcriber(private val ctx: Context) {
+/** App-wide engine: one background thread, one loaded Whisper model, shared by the screen and the bubble. */
+object Transcriber {
 
+    private lateinit var ctx: Context
     private val exec = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private var whisper = 0L
-    private var loadedModel: String? = null
 
     /** paths currently queued or running */
     val pending: MutableSet<String> = java.util.Collections.synchronizedSet(LinkedHashSet())
+    private val listeners = CopyOnWriteArraySet<() -> Unit>()
 
-    var onChanged: (() -> Unit)? = null
+    fun init(c: Context) { if (!::ctx.isInitialized) ctx = c.applicationContext }
 
-    fun enqueue(path: String) {
-        if (VoiceNotes.transcript(ctx, path) != null) return
+    fun addListener(l: () -> Unit) { listeners.add(l) }
+    fun removeListener(l: () -> Unit) { listeners.remove(l) }
+
+    fun enqueue(path: String, force: Boolean = false) {
+        if (!force && VoiceNotes.transcript(ctx, path) != null) return
         if (!pending.add(path)) return
         notifyChanged()
         exec.execute {
-            val text = try {
-                run(path)
-            } catch (t: Throwable) {
-                "⚠️ حصل خطأ: ${t.message}"
-            }
-            VoiceNotes.save(ctx, path, text.trim().ifEmpty { "(مفيش كلام واضح)" })
+            val started = System.currentTimeMillis()
+            val text = try { run(path) } catch (t: Throwable) { "⚠️ حصل خطأ: ${t.message}" }
+            VoiceNotes.save(ctx, path, text.trim().ifEmpty { "(مفيش كلام واضح)" }, System.currentTimeMillis() - started)
             pending.remove(path)
             notifyChanged()
         }
     }
 
     private fun run(path: String): String {
-        val model = Prefs.modelPath(ctx) ?: return "⚠️ لازم تحمّل موديل Whisper الأول من التطبيق"
-        if (whisper == 0L || loadedModel != model) {
-            if (whisper != 0L) WhisperLib.freeContext(whisper)
+        if (whisper == 0L) {
+            val model = ModelManager.ensureReady(ctx)
             whisper = WhisperLib.initContext(model)
-            loadedModel = model
-            if (whisper == 0L) return "⚠️ ملف الموديل بايظ، حمّله تاني"
+            if (whisper == 0L) return "⚠️ مش قادر أفتح موديل Whisper"
         }
         val pcm = AudioDecoder.decodeTo16kMono(path)
         if (pcm.size < 1600) return ""
@@ -50,10 +50,8 @@ class Transcriber(private val ctx: Context) {
         return WhisperLib.transcribe(whisper, pcm, lang, threads, prompt)
     }
 
-    private fun notifyChanged() = main.post { onChanged?.invoke() }
+    /** Free the ~300 MB model from RAM; it reloads on the next transcription. */
+    fun unload() = exec.execute { if (whisper != 0L) { WhisperLib.freeContext(whisper); whisper = 0L } }
 
-    fun release() {
-        exec.execute { if (whisper != 0L) { WhisperLib.freeContext(whisper); whisper = 0L } }
-        exec.shutdown()
-    }
+    private fun notifyChanged() = main.post { listeners.forEach { it() } }
 }

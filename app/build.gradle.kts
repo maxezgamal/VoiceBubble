@@ -11,8 +11,8 @@ android {
         applicationId = "com.rawag.voicebubble"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
 
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
@@ -45,6 +45,9 @@ android {
             version = "3.22.1"
         }
     }
+
+    // Whisper model is bundled in assets and must stay uncompressed
+    androidResources { noCompress += listOf("bin") }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
